@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -8,28 +7,38 @@ import { CheckCircle, XCircle, Clock, User } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+import { eventsApi } from "@/integrations/api";
+
+interface Event {
+  id: number;
+  title: string;
+  description: string | null;
+  start_date: string;
+  end_date: string;
+  start_time: string | null;
+  end_time: string | null;
+  all_day: boolean;
+  event_type: string;
+  status: string;
+  created_at: string;
+  creator?: { full_name: string; email: string };
+}
 
 const Approvals = () => {
   const { toast } = useToast();
-  const [events, setEvents] = useState<any[]>([]);
+  const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
-  const [processing, setProcessing] = useState<string | null>(null);
+  const [processing, setProcessing] = useState<number | null>(null);
 
   const fetchPendingEvents = async () => {
     try {
-      const { data, error } = await supabase
-        .from("events")
-        .select("*, profiles!events_created_by_fkey(full_name, email)")
-        .eq("status", "pending")
-        .order("created_at", { ascending: false });
-
-      if (error) throw error;
-      setEvents(data || []);
+      const response = await eventsApi.getPendingEvents();
+      setEvents(response.data.events || []);
     } catch (error: any) {
       toast({
         variant: "destructive",
         title: "Erro ao carregar eventos",
-        description: error.message,
+        description: error.response?.data?.error || error.message,
       });
     } finally {
       setLoading(false);
@@ -38,90 +47,49 @@ const Approvals = () => {
 
   useEffect(() => {
     fetchPendingEvents();
-
-    // Subscribe to realtime updates
-    const channel = supabase
-      .channel("pending-events-changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "events",
-          filter: "status=eq.pending",
-        },
-        () => {
-          fetchPendingEvents();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, []);
 
-  const handleApprove = async (eventId: string) => {
+  const handleApprove = async (eventId: number) => {
     setProcessing(eventId);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Usuário não autenticado");
-
-      const { error } = await supabase
-        .from("events")
-        .update({
-          status: "approved",
-          approved_by: user.id,
-          approved_at: new Date().toISOString(),
-        })
-        .eq("id", eventId);
-
-      if (error) throw error;
+      await eventsApi.approveEvent(eventId);
 
       toast({
         title: "Evento aprovado",
-        description: "O evento foi aprovado e será sincronizado com o Google Calendar.",
+        description: "O evento foi aprovado com sucesso.",
       });
+
+      fetchPendingEvents();
     } catch (error: any) {
       toast({
         variant: "destructive",
         title: "Erro ao aprovar evento",
-        description: error.message,
+        description: error.response?.data?.error || error.message,
       });
     } finally {
       setProcessing(null);
     }
   };
 
-  const handleReject = async (eventId: string) => {
+  const handleReject = async (eventId: number) => {
     if (!confirm("Tem certeza que deseja rejeitar este evento?")) return;
 
     setProcessing(eventId);
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Usuário não autenticado");
-
-      const { error } = await supabase
-        .from("events")
-        .update({
-          status: "rejected",
-          approved_by: user.id,
-          approved_at: new Date().toISOString(),
-        })
-        .eq("id", eventId);
-
-      if (error) throw error;
+      await eventsApi.rejectEvent(eventId);
 
       toast({
         title: "Evento rejeitado",
         description: "O evento foi rejeitado.",
         variant: "destructive",
       });
+
+      fetchPendingEvents();
     } catch (error: any) {
       toast({
         variant: "destructive",
         title: "Erro ao rejeitar evento",
-        description: error.message,
+        description: error.response?.data?.error || error.message,
       });
     } finally {
       setProcessing(null);
@@ -144,7 +112,7 @@ const Approvals = () => {
             </div>
           ) : events.length === 0 ? (
             <div className="text-center py-12">
-              <CheckCircle className="w-16 h-16 mx-auto text-success mb-4" />
+              <CheckCircle className="w-16 h-16 mx-auto text-green-600 mb-4" />
               <p className="text-muted-foreground">
                 Não há eventos pendentes de aprovação
               </p>
@@ -160,7 +128,7 @@ const Approvals = () => {
                     <div className="flex-1 space-y-3">
                       <div className="flex items-center gap-3">
                         <h3 className="font-semibold text-lg">{event.title}</h3>
-                        <Badge variant="outline" className="bg-event-pending text-warning-foreground">
+                        <Badge variant="outline" className="bg-yellow-100 text-yellow-800">
                           <Clock className="w-3 h-3 mr-1" />
                           Pendente
                         </Badge>
@@ -169,7 +137,7 @@ const Approvals = () => {
                       <div className="flex items-center gap-2 text-sm text-muted-foreground">
                         <User className="w-4 h-4" />
                         <span>
-                          Solicitado por: <strong>{event.profiles?.full_name || event.profiles?.email}</strong>
+                          Solicitado por: <strong>{event.creator?.full_name || event.creator?.email}</strong>
                         </span>
                       </div>
 
@@ -210,7 +178,7 @@ const Approvals = () => {
                       <Button
                         onClick={() => handleApprove(event.id)}
                         disabled={processing === event.id}
-                        className="bg-success hover:bg-success/90"
+                        className="bg-green-600 hover:bg-green-700"
                       >
                         <CheckCircle className="w-4 h-4 mr-2" />
                         {processing === event.id ? "Processando..." : "Aprovar"}

@@ -1,6 +1,5 @@
 import { ReactNode, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
@@ -24,55 +23,30 @@ const DashboardLayout = ({ children, activeTab }: DashboardLayoutProps) => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [user, setUser] = useState<any>(null);
-  const [profile, setProfile] = useState<any>(null);
-  const [role, setRole] = useState<"supervisor" | "coordenador" | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     const fetchUserData = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) {
+      try {
+        const userStr = localStorage.getItem("user");
+        if (!userStr) {
+          navigate("/auth");
+          return;
+        }
+        setUser(JSON.parse(userStr));
+      } catch {
         navigate("/auth");
-        return;
-      }
-
-      setUser(session.user);
-
-      // Fetch profile
-      const { data: profileData } = await supabase
-        .from("profiles")
-        .select("*")
-        .eq("id", session.user.id)
-        .single();
-
-      if (profileData) {
-        setProfile(profileData);
-      }
-
-      // Fetch user role
-      const { data: roleData } = await supabase
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", session.user.id)
-        .single();
-
-      if (roleData) {
-        setRole(roleData.role);
+      } finally {
+        setLoading(false);
       }
     };
 
     fetchUserData();
-
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!session) {
-        navigate("/auth");
-      }
-    });
-
-    return () => subscription.unsubscribe();
   }, [navigate]);
 
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    localStorage.removeItem("auth_token");
+    localStorage.removeItem("user");
     toast({
       title: "Logout realizado",
       description: "Você foi desconectado com sucesso.",
@@ -80,14 +54,14 @@ const DashboardLayout = ({ children, activeTab }: DashboardLayoutProps) => {
     navigate("/auth");
   };
 
-  const NavButton = ({ 
-    icon: Icon, 
-    label, 
-    value, 
-    onClick 
-  }: { 
-    icon: any; 
-    label: string; 
+  const NavButton = ({
+    icon: Icon,
+    label,
+    value,
+    onClick
+  }: {
+    icon: any;
+    label: string;
     value: "events" | "approvals" | "calendar";
     onClick: () => void;
   }) => (
@@ -105,7 +79,7 @@ const DashboardLayout = ({ children, activeTab }: DashboardLayoutProps) => {
     </button>
   );
 
-  if (!user || !profile) {
+  if (loading || !user) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
@@ -118,7 +92,6 @@ const DashboardLayout = ({ children, activeTab }: DashboardLayoutProps) => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-background via-primary/5 to-background">
-      {/* Header */}
       <header className="bg-card border-b border-border shadow-sm sticky top-0 z-10">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center gap-3">
@@ -135,9 +108,8 @@ const DashboardLayout = ({ children, activeTab }: DashboardLayoutProps) => {
             <DropdownMenuTrigger asChild>
               <Button variant="ghost" className="relative h-12 w-12 rounded-full">
                 <Avatar className="h-12 w-12 border-2 border-primary/20">
-                  <AvatarImage src={profile.avatar_url} alt={profile.full_name || profile.email} />
                   <AvatarFallback className="bg-primary/10 text-primary font-semibold">
-                    {profile.full_name?.charAt(0) || profile.email?.charAt(0).toUpperCase()}
+                    {user.email?.charAt(0).toUpperCase() || "U"}
                   </AvatarFallback>
                 </Avatar>
               </Button>
@@ -145,13 +117,13 @@ const DashboardLayout = ({ children, activeTab }: DashboardLayoutProps) => {
             <DropdownMenuContent className="w-64" align="end">
               <DropdownMenuLabel className="font-normal">
                 <div className="flex flex-col space-y-2">
-                  <p className="text-sm font-medium">{profile.full_name || "Usuário"}</p>
-                  <p className="text-xs text-muted-foreground">{profile.email}</p>
+                  <p className="text-sm font-medium">{user.full_name || "Usuário"}</p>
+                  <p className="text-xs text-muted-foreground">{user.email}</p>
                   <div className="flex items-center gap-2 mt-1">
-                    {role === "supervisor" ? (
+                    {user.role === "supervisor" || user.role === "admin" ? (
                       <div className="flex items-center gap-1 text-xs bg-primary/10 text-primary px-2 py-1 rounded-full">
                         <Shield className="h-3 w-3" />
-                        Supervisor
+                        {user.role === "admin" ? "Admin" : "Supervisor"}
                       </div>
                     ) : (
                       <div className="flex items-center gap-1 text-xs bg-secondary text-secondary-foreground px-2 py-1 rounded-full">
@@ -173,7 +145,6 @@ const DashboardLayout = ({ children, activeTab }: DashboardLayoutProps) => {
       </header>
 
       <div className="container mx-auto px-4 py-6 flex gap-6">
-        {/* Sidebar */}
         <aside className="w-64 flex-shrink-0">
           <nav className="bg-card rounded-lg border border-border p-4 space-y-2 sticky top-24 shadow-sm">
             <NavButton
@@ -182,7 +153,7 @@ const DashboardLayout = ({ children, activeTab }: DashboardLayoutProps) => {
               value="events"
               onClick={() => navigate("/dashboard")}
             />
-            {role === "supervisor" && (
+            {(user.role === "supervisor" || user.role === "admin") && (
               <NavButton
                 icon={CheckSquare}
                 label="Aprovações Pendentes"
@@ -199,7 +170,6 @@ const DashboardLayout = ({ children, activeTab }: DashboardLayoutProps) => {
           </nav>
         </aside>
 
-        {/* Main Content */}
         <main className="flex-1">
           {children}
         </main>

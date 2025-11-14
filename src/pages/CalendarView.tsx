@@ -1,36 +1,37 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, parseISO } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { eventsApi } from "@/integrations/api";
+
+interface Event {
+  id: number;
+  title: string;
+  start_date: string;
+  end_date: string;
+  event_type: string;
+}
 
 const CalendarView = () => {
   const { toast } = useToast();
-  const [events, setEvents] = useState<any[]>([]);
+  const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentMonth, setCurrentMonth] = useState(new Date());
 
   const fetchApprovedEvents = async () => {
     try {
-      const { data, error } = await supabase
-        .from("events")
-        .select("*, profiles!events_created_by_fkey(full_name, email)")
-        .eq("status", "approved")
-        .order("start_date", { ascending: true });
-
-      if (error) throw error;
-      setEvents(data || []);
+      const response = await eventsApi.getApprovedEvents();
+      setEvents(response.data.events || []);
     } catch (error: any) {
       toast({
         variant: "destructive",
         title: "Erro ao carregar eventos",
-        description: error.message,
+        description: error.response?.data?.error || error.message,
       });
     } finally {
       setLoading(false);
@@ -39,26 +40,6 @@ const CalendarView = () => {
 
   useEffect(() => {
     fetchApprovedEvents();
-
-    const channel = supabase
-      .channel("approved-events-changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "events",
-          filter: "status=eq.approved",
-        },
-        () => {
-          fetchApprovedEvents();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, []);
 
   const monthStart = startOfMonth(currentMonth);
@@ -135,12 +116,10 @@ const CalendarView = () => {
               </div>
 
               <div className="grid grid-cols-7 gap-2">
-                {/* Empty cells for days before month starts */}
                 {Array.from({ length: monthStart.getDay() }).map((_, i) => (
                   <div key={`empty-${i}`} className="min-h-[120px]" />
                 ))}
 
-                {/* Calendar days */}
                 {daysInMonth.map((day) => {
                   const dayEvents = getEventsForDay(day);
                   const isToday = isSameDay(day, new Date());
@@ -186,7 +165,6 @@ const CalendarView = () => {
                 })}
               </div>
 
-              {/* Legend */}
               <div className="mt-6 pt-6 border-t border-border">
                 <h3 className="font-semibold mb-3">Legenda:</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">

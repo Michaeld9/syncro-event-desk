@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
-import { supabase } from "@/integrations/supabase/client";
+import { eventsApi } from "@/integrations/api";
 import {
   Dialog,
   DialogContent,
@@ -112,9 +112,6 @@ const EventFormDialog = ({ open, onOpenChange, event, onSuccess }: EventFormDial
     setSubmitting(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error("Usuário não autenticado");
-
       const eventData = {
         title: values.title,
         event_type: values.event_type,
@@ -124,30 +121,16 @@ const EventFormDialog = ({ open, onOpenChange, event, onSuccess }: EventFormDial
         start_time: values.all_day ? null : values.start_time || null,
         end_time: values.all_day ? null : values.end_time || null,
         description: values.description || null,
-        created_by: user.id,
       };
 
       if (event) {
-        // Update existing event
-        const { error } = await supabase
-          .from("events")
-          .update(eventData)
-          .eq("id", event.id);
-
-        if (error) throw error;
-
+        await eventsApi.updateEvent(event.id, eventData);
         toast({
           title: "Evento atualizado",
           description: "O evento foi atualizado com sucesso.",
         });
       } else {
-        // Create new event
-        const { error } = await supabase
-          .from("events")
-          .insert(eventData);
-
-        if (error) throw error;
-
+        await eventsApi.createEvent(eventData);
         toast({
           title: "Evento criado",
           description: "O evento foi criado e está aguardando aprovação.",
@@ -159,7 +142,7 @@ const EventFormDialog = ({ open, onOpenChange, event, onSuccess }: EventFormDial
       toast({
         variant: "destructive",
         title: "Erro ao salvar evento",
-        description: error.message,
+        description: error.response?.data?.error || error.message,
       });
     } finally {
       setSubmitting(false);

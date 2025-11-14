@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { supabase } from "@/integrations/supabase/client";
 import DashboardLayout from "@/components/DashboardLayout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,32 +8,37 @@ import { useToast } from "@/hooks/use-toast";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 import EventFormDialog from "@/components/EventFormDialog";
+import { eventsApi } from "@/integrations/api";
+
+interface Event {
+  id: number;
+  title: string;
+  description: string | null;
+  start_date: string;
+  end_date: string;
+  start_time: string | null;
+  end_time: string | null;
+  all_day: boolean;
+  event_type: string;
+  status: 'pending' | 'approved' | 'rejected';
+}
 
 const Dashboard = () => {
   const { toast } = useToast();
-  const [events, setEvents] = useState<any[]>([]);
+  const [events, setEvents] = useState<Event[]>([]);
   const [loading, setLoading] = useState(true);
   const [showEventDialog, setShowEventDialog] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<any>(null);
+  const [editingEvent, setEditingEvent] = useState<Event | null>(null);
 
   const fetchEvents = async () => {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
-
-      const { data, error } = await supabase
-        .from("events")
-        .select("*, profiles!events_created_by_fkey(full_name, email)")
-        .eq("created_by", user.id)
-        .order("start_date", { ascending: true });
-
-      if (error) throw error;
-      setEvents(data || []);
+      const response = await eventsApi.getMyEvents();
+      setEvents(response.data.events || []);
     } catch (error: any) {
       toast({
         variant: "destructive",
         title: "Erro ao carregar eventos",
-        description: error.message,
+        description: error.response?.data?.error || error.message,
       });
     } finally {
       setLoading(false);
@@ -43,39 +47,14 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchEvents();
-
-    // Subscribe to realtime updates
-    const channel = supabase
-      .channel("events-changes")
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "events",
-        },
-        () => {
-          fetchEvents();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
   }, []);
 
-  const handleDelete = async (eventId: string) => {
+  const handleDelete = async (eventId: number) => {
     if (!confirm("Tem certeza que deseja excluir este evento?")) return;
 
     try {
-      const { error } = await supabase
-        .from("events")
-        .delete()
-        .eq("id", eventId);
-
-      if (error) throw error;
-
+      await eventsApi.deleteEvent(eventId);
+      setEvents(events.filter(e => e.id !== eventId));
       toast({
         title: "Evento excluído",
         description: "O evento foi removido com sucesso.",
@@ -84,16 +63,16 @@ const Dashboard = () => {
       toast({
         variant: "destructive",
         title: "Erro ao excluir evento",
-        description: error.message,
+        description: error.response?.data?.error || error.message,
       });
     }
   };
 
   const getStatusBadge = (status: string) => {
     const statusConfig = {
-      pending: { label: "Pendente", icon: Clock, className: "bg-event-pending text-warning-foreground" },
-      approved: { label: "Aprovado", icon: CheckCircle2, className: "bg-event-approved text-success-foreground" },
-      rejected: { label: "Rejeitado", icon: XCircle, className: "bg-event-rejected text-destructive-foreground" },
+      pending: { label: "Pendente", icon: Clock, className: "bg-yellow-100 text-yellow-800" },
+      approved: { label: "Aprovado", icon: CheckCircle2, className: "bg-green-100 text-green-800" },
+      rejected: { label: "Rejeitado", icon: XCircle, className: "bg-red-100 text-red-800" },
     };
 
     const config = statusConfig[status as keyof typeof statusConfig];
